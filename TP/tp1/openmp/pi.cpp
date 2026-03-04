@@ -76,7 +76,7 @@ int main()
             auto start_time = std::chrono::high_resolution_clock::now();
             double pi_serial = compute_pi_serial(num_terms);
             auto end_time = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> serial_duration = end_time - start_time;
+            std::chrono::duration<double> serial_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
 
             start_time = std::chrono::high_resolution_clock::now();
             double pi_parallel = compute_pi_parallel(num_terms, num_threads);
