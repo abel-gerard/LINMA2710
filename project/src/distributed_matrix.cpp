@@ -18,7 +18,18 @@ DistributedMatrix::DistributedMatrix(const Matrix& matrix, int numProcs)
 {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    // TODO
+    int baseSizePerProc = globalCols / numProcesses;
+    int remainderSize = globalCols % numProcesses;
+
+    localCols = baseSizePerProc + (rank < remainderSize);
+    startCol = rank * baseSizePerProc + (rank < remainderSize ? rank : remainderSize);
+
+    localData = Matrix(globalRows, localCols);
+    for (size_t i = 0; i < globalRows; i++) {
+        for (size_t j = 0; j < localCols; j++) {
+            localData.set(i, j, matrix.get(i, startCol + j));
+        }
+    }
 }
 
 DistributedMatrix::DistributedMatrix(const DistributedMatrix& other)
@@ -135,7 +146,16 @@ double DistributedMatrix::sum() const
 Matrix DistributedMatrix::gather() const
 {
     // TODO
-    return Matrix(globalRows, globalCols);
+    Matrix gathered(0, 0);
+    if (rank == 0) {
+        gathered = Matrix(globalRows, globalCols);
+    }
+
+    MPI_Gatherv(
+        
+    );
+
+    return gathered;
 }
 
 void sync_matrix(Matrix *matrix, int rank, int src)

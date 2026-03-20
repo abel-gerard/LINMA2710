@@ -30,7 +30,10 @@ const std::string kernel_source_square = R"(
     __kernel void square(__global const float* x,
                          __global float* y,
                          int N) {
-        // TODO 1
+        int i = get_global_id(0);
+        if (i < N) {
+            y[i] = x[i] * x[i];
+        }
     }
 )";
 
@@ -176,6 +179,12 @@ int main() {
     // Follow the same pattern as the fill kernel above.
 
     // TODO 2 (start)
+    
+    kernel_square.setArg(0, d_x);
+    kernel_square.setArg(1, d_y);
+    kernel_square.setArg(2, N);
+    queue.enqueueNDRangeKernel(kernel_square, cl::NullRange, cl::NDRange(N), cl::NullRange);
+    queue.finish();
 
     // TODO 2 (end)
 
@@ -254,6 +263,13 @@ int main() {
     auto t_multi_start = std::chrono::high_resolution_clock::now();
 
     // TODO 5 (start)
+
+    for (int i = 0; i < N_ITER; i++) {
+        kernel_square_inplace.setArg(0, d_z);
+        kernel_square_inplace.setArg(1, N);
+        queue.enqueueNDRangeKernel(kernel_square_inplace, cl::NullRange, cl::NDRange(N), cl::NullRange);
+    }
+    queue.finish();
 
     // TODO 5 (end)
 
