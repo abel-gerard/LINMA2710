@@ -3,6 +3,11 @@
 #include <algorithm>
 #include <cmath>
 
+#if 1
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter" 
+#endif
+
 // The matrix is split by columns across MPI processes.
 // Each process stores a local Matrix with a subset of columns.
 // Columns are distributed as evenly as possible.
@@ -25,8 +30,8 @@ DistributedMatrix::DistributedMatrix(const Matrix& matrix, int numProcs)
     startCol = rank * baseSizePerProc + (rank < remainderSize ? rank : remainderSize);
 
     localData = Matrix(globalRows, localCols);
-    for (size_t i = 0; i < globalRows; i++) {
-        for (size_t j = 0; j < localCols; j++) {
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
             localData.set(i, j, matrix.get(i, startCol + j));
         }
     }
@@ -41,6 +46,7 @@ DistributedMatrix::DistributedMatrix(const DistributedMatrix& other)
       rank(other.rank),
       localData(other.localData)
 {
+
 }
 
 int DistributedMatrix::numRows() const { return globalRows; }
@@ -146,14 +152,51 @@ double DistributedMatrix::sum() const
 Matrix DistributedMatrix::gather() const
 {
     // TODO
-    Matrix gathered(0, 0);
+    int sendcount = localCols * globalRows;
+    int recvcount = globalCols * globalRows;
+    std::vector<double> sendbuf(sendcount), recvbuf;
+    Matrix gathered(globalRows, globalCols);
+    
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
+            sendbuf[i*localCols+j] = localData.get(i, j);
+        }
+    }
+    
     if (rank == 0) {
         gathered = Matrix(globalRows, globalCols);
+        recvbuf.resize(recvcount);
+    }
+
+    std::vector<int> recvcounts(numProcesses), displs(numProcesses);
+    int baseSizePerProc = globalCols / numProcesses;
+    int remainderSize = globalCols % numProcesses;
+
+    for (int p = 0; p < numProcesses; p++) {
+        int cols = baseSizePerProc + (p < remainderSize);
+        recvcounts[p] = cols * globalRows;
+        displs[p] = (p > 0) ? displs[p-1] + recvcounts[p-1] : 0;
     }
 
     MPI_Gatherv(
-        
+        sendbuf.data(), sendcount, MPI_DOUBLE,
+        rank == 0 ? recvbuf.data() : nullptr, recvcounts.data(), displs.data(), MPI_DOUBLE,
+        0, MPI_COMM_WORLD
     );
+
+    if (rank == 0) {
+        // recvbuf looks like:
+        // [col0 col1 col0 col1 ... col2 col3 ... colN]
+        for (int p = 0; p < numProcesses; p++) {
+            int localCols = recvcounts[p] / globalRows; 
+            int startCol = displs[p] / globalRows;
+            for (int i = 0; i < globalRows; i++) {
+                for (int j = 0; j < localCols; j++) {
+                    gathered.set(i, startCol + j, recvbuf[displs[p] + i*localCols + j]);
+                }
+            }
+        }
+    }
 
     return gathered;
 }

@@ -4,6 +4,7 @@
 #include <omp.h>
 #endif
 
+
 Matrix::Matrix(int rows, int cols)
     : rows(0), cols(0)
 {
@@ -111,11 +112,7 @@ Matrix Matrix::operator*(const Matrix &other) const
             const double *const data_other = &t_other.data[j*t_other.cols];
             
             // Pragma is a bit useless
-<<<<<<< HEAD
-            #pragma omp simd reduction(+:acc) num_threads(12)
-=======
-            #pragma omp simd reduction(+:acc)
->>>>>>> main
+            // #pragma omp simd reduction(+:acc) num_threads(12)
             for (int k = 0; k < cols; k++) {
                 acc += data_self[k] * data_other[k];
             }
