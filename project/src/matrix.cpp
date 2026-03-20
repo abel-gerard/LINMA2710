@@ -111,7 +111,11 @@ Matrix Matrix::operator*(const Matrix &other) const
             const double *const data_other = &t_other.data[j*t_other.cols];
             
             // Pragma is a bit useless
+<<<<<<< HEAD
             #pragma omp simd reduction(+:acc) num_threads(12)
+=======
+            #pragma omp simd reduction(+:acc)
+>>>>>>> main
             for (int k = 0; k < cols; k++) {
                 acc += data_self[k] * data_other[k];
             }
