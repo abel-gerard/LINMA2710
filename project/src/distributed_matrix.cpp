@@ -66,20 +66,17 @@ void DistributedMatrix::set(int i, int j, double value)
 
 int DistributedMatrix::globalColIndex(int localColIdx) const
 {
-    // TODO
-    return -1;
+    return startCol + localColIdx;
 }
 
 int DistributedMatrix::localColIndex(int globalColIdx) const
 {
-    // TODO
-    return -1;
+    return globalColIdx - startCol;
 }
 
 int DistributedMatrix::ownerProcess(int globalColIdx) const
 {
-    // TODO
-    return -1;
+    return localColIndex(globalColIdx) >= 0 && localColIndex(globalColIdx) < localCols ? rank : -1;
 }
 
 void DistributedMatrix::fill(double value)
@@ -118,8 +115,15 @@ void DistributedMatrix::sub_mul(double scalar, const DistributedMatrix& other)
 
 DistributedMatrix DistributedMatrix::apply(const std::function<double(double)>& func) const
 {
-    // TODO
-    return DistributedMatrix(*this);
+    DistributedMatrix result(*this);
+
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
+            result.localData.set(i, j, func(localData.get(i, j)));
+        }
+    }
+
+    return result;
 }
 
 DistributedMatrix DistributedMatrix::applyBinary(
@@ -127,14 +131,35 @@ DistributedMatrix DistributedMatrix::applyBinary(
     const DistributedMatrix& b,
     const std::function<double(double, double)>& func)
 {
-    // TODO
-    return DistributedMatrix(a);
+    DistributedMatrix result(a);
+
+    for (int i = 0; i < a.globalRows; i++) {
+        for (int j = 0; j < a.localCols; j++) {
+            result.localData.set(i, j, func(a.localData.get(i, j), b.localData.get(i, j)));
+        }
+    }
+
+    return result;
 }
 
 DistributedMatrix multiply(const Matrix& left, const DistributedMatrix& right)
 {
-    // TODO
-    return DistributedMatrix(right);
+    Matrix matResult(left.numRows(), right.localCols);
+
+    for (int i = 0; i < left.numRows(); i++) {
+        for (int j = 0; j < right.localCols; j++) {
+            double sum = 0.0;
+            for (int k = 0; k < left.numCols(); k++) {
+                sum += left.get(i, k) * right.localData.get(k, j);
+            }
+            matResult.set(i, j, sum);
+        }
+    }
+
+    DistributedMatrix result(right);
+    result.globalRows = left.numRows();
+    result.localData = matResult;
+    return result;
 }
 
 Matrix DistributedMatrix::multiplyTransposed(const DistributedMatrix& other) const
@@ -153,7 +178,7 @@ Matrix DistributedMatrix::gather() const
 {
     int sendcount = localCols * globalRows;
     int recvcount = globalCols * globalRows;
-    std::vector<double> sendbuf(sendcount), recvbuf;
+    std::vector<double> sendbuf(sendcount), recvbuf(recvcount);
     Matrix gathered(globalRows, globalCols);
     
     for (int i = 0; i < globalRows; i++) {
@@ -162,9 +187,6 @@ Matrix DistributedMatrix::gather() const
         }
     }
     
-    gathered = Matrix(globalRows, globalCols);
-    recvbuf.resize(recvcount);
-
     std::vector<int> recvcounts(numProcesses), displs(numProcesses);
     int baseSizePerProc = globalCols / numProcesses;
     int remainderSize = globalCols % numProcesses;
