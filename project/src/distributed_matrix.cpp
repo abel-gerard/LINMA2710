@@ -55,13 +55,20 @@ const Matrix& DistributedMatrix::getLocalData() const { return localData; }
 
 double DistributedMatrix::get(int i, int j) const
 {
-    // TODO
-    return 0.0;
+    int localJ = localColIndex(j);
+    if (localJ < 0 || localJ >= localCols)
+        throw std::out_of_range("Column index not owned by this process");
+
+    return localData.get(i, localJ);
 }
 
 void DistributedMatrix::set(int i, int j, double value)
 {
-    // TODO
+    int localJ = localColIndex(j);
+    if (localJ < 0 || localJ >= localCols)
+        throw std::out_of_range("Column index not owned by this process");
+
+    localData.set(i, localJ, value);
 }
 
 int DistributedMatrix::globalColIndex(int localColIdx) const
@@ -81,36 +88,66 @@ int DistributedMatrix::ownerProcess(int globalColIdx) const
 
 void DistributedMatrix::fill(double value)
 {
-    // TODO
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
+            localData.set(i, j, value);
+        }
+    }
 }
 
 DistributedMatrix DistributedMatrix::operator+(const DistributedMatrix& other) const
 {
-    // TODO
-    return DistributedMatrix(*this);
+    DistributedMatrix result(*this);
+
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
+            result.localData.set(i, j, localData.get(i, j) + other.localData.get(i, j));
+        }
+    }
+
+    return result;
 }
 
 DistributedMatrix DistributedMatrix::operator-(const DistributedMatrix& other) const
 {
-    // TODO
-    return DistributedMatrix(*this);
+    DistributedMatrix result(*this);
+
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
+            result.localData.set(i, j, localData.get(i, j) - other.localData.get(i, j));
+        }
+    }
+
+    return result;
 }
 
 DistributedMatrix DistributedMatrix::operator*(double scalar) const
 {
-    // TODO
-    return DistributedMatrix(*this);
+    DistributedMatrix result(*this);
+
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
+            result.localData.set(i, j, localData.get(i, j) * scalar);
+        }
+    }
+
+    return result;
 }
 
 Matrix DistributedMatrix::transpose() const
 {
-    // TODO
-    return Matrix(globalCols, globalRows);
+    Matrix result = gather();
+
+    return result.transpose();
 }
 
 void DistributedMatrix::sub_mul(double scalar, const DistributedMatrix& other)
 {
-    // TODO
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
+            localData.set(i, j, localData.get(i, j) - other.localData.get(i, j) * scalar);
+        }
+    }
 }
 
 DistributedMatrix DistributedMatrix::apply(const std::function<double(double)>& func) const
@@ -146,8 +183,8 @@ DistributedMatrix multiply(const Matrix& left, const DistributedMatrix& right)
 {
     Matrix matResult(left.numRows(), right.localCols);
 
-    for (int i = 0; i < left.numRows(); i++) {
-        for (int j = 0; j < right.localCols; j++) {
+    for (int i = 0; i < matResult.numRows(); i++) {
+        for (int j = 0; j < matResult.numCols(); j++) {
             double sum = 0.0;
             for (int k = 0; k < left.numCols(); k++) {
                 sum += left.get(i, k) * right.localData.get(k, j);
@@ -156,22 +193,65 @@ DistributedMatrix multiply(const Matrix& left, const DistributedMatrix& right)
         }
     }
 
+    // Copy back to a DistributedMatrix without partioning it again
     DistributedMatrix result(right);
     result.globalRows = left.numRows();
     result.localData = matResult;
+
     return result;
 }
 
 Matrix DistributedMatrix::multiplyTransposed(const DistributedMatrix& other) const
 {
-    // TODO
-    return Matrix(globalRows, other.globalRows);
+    // (m x n) * (p x n)^T -> (m x p)
+    int resultRows = globalRows, resultCols = other.globalRows;
+    int count = globalRows * other.globalRows;
+    std::vector<double> vecResult(count);
+
+    // Compute A^(i)B^(i)^T for the current rank
+    for (int i = 0; i < resultRows; i++) {
+        for (int j = 0; j < resultCols; j++) {
+            double sum = 0.0;
+            for (int k = 0; k < localCols; k++) {
+                sum += localData.get(i, k) * other.localData.get(j, k);
+            }
+            vecResult[i * resultCols + j] = sum;
+        }
+    }
+
+    // Reduce across all processes to get the final result
+    MPI_Allreduce(
+        MPI_IN_PLACE, vecResult.data(),
+        count, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD
+    );
+
+    Matrix result(resultRows, resultCols);
+    for (int i = 0; i < resultRows; i++) {
+        for (int j = 0; j < resultCols; j++) {
+            result.set(i, j, vecResult[i * resultCols + j]);
+        }
+    }
+
+    return result;
 }
 
 double DistributedMatrix::sum() const
 {
-    // TODO
-    return 0.0;
+    // Sequential reduce + MPI_Allreduce
+    double sum = 0.0;
+
+    for (int i = 0; i < globalRows; i++) {
+        for (int j = 0; j < localCols; j++) {
+            sum += localData.get(i, j);
+        }
+    }
+
+    MPI_Allreduce(
+        MPI_IN_PLACE, &sum,
+        1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD
+    );
+
+    return sum;
 }
 
 Matrix DistributedMatrix::gather() const
