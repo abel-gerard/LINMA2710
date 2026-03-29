@@ -5,6 +5,11 @@
 #include <stdexcept>
 #include <memory>
 
+#if 1
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter" 
+#endif
+
 std::shared_ptr<KernelCache> MatrixCL::kernels_ = nullptr;
 
 cl::Program loadAndBuildProgram(cl::Context context,
@@ -35,7 +40,10 @@ cl::Program loadAndBuildProgram(cl::Context context,
 
 const std::string kernel_source_fill = R"(
     __kernel void fill(__global float* matrix, float value, int rows, int cols) {
-        // TODO
+        int i = get_global_id(0);
+        if (i < rows*cols) {
+            matrix[i] = value;
+        }
     }
 )";
 
@@ -44,7 +52,8 @@ const std::string kernel_source_add = R"(
                       __global const float* B,
                       __global float* C,
                       int rows, int cols) {
-        // TODO
+        int i = get_global_id(0);
+        if (i >= rows * cols) return;
     }
 )";
 
@@ -53,7 +62,8 @@ const std::string kernel_source_sub_mul = R"(
                           __global const float* B,
                           float scalar,
                           int rows, int cols) {
-        // TODO
+        int i = get_global_id(0);
+        if (i >= rows * cols) return;
     }
 )";
 
@@ -61,7 +71,8 @@ const std::string kernel_source_transpose = R"(
     __kernel void transpose(__global const float* A,
                             __global float* B,
                             int A_rows, int A_cols) {
-        // TODO
+        int i = get_global_id(0);
+        if (i >= A_rows * A_cols) return;
     }
 )";
 
@@ -70,7 +81,8 @@ const std::string kernel_source_matrix_mul = R"(
                              __global const float* B,
                              __global float* C,
                              int A_rows, int A_cols, int B_cols) {
-        // TODO
+        int i = get_global_id(0);
+        if (i >= A_rows * B_cols) return;
     }
 )";
 
@@ -133,21 +145,78 @@ size_t MatrixCL::buffer_size_bytes() const {
 MatrixCL::MatrixCL(int rows, int cols, cl::Context context, cl::CommandQueue queue, const std::vector<float>* initial_data)
     : rows_(rows), cols_(cols), context_(context), queue_(queue)
 {
-    // TODO
+    if (rows <= 0 || cols <= 0) {
+        throw std::invalid_argument("Matrix dimension can't be negative");
+    }
+
+    size_t N = rows * cols;
+
+    if (initial_data) {
+        if (initial_data->size() != N) {
+            throw std::invalid_argument("Dimension mismatch between arguments");
+        }
+        
+        buffer_ = cl::Buffer(
+            context_,
+            CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+            buffer_size_bytes(),
+            const_cast<float*>(initial_data->data())
+        );
+
+    } else {
+        buffer_ = cl::Buffer(
+            context_,
+            CL_MEM_READ_WRITE,
+            buffer_size_bytes()
+        );
+    }
 }
 
 MatrixCL::MatrixCL(const MatrixCL& other)
     : rows_(other.rows_), cols_(other.cols_),
       context_(other.context_), queue_(other.queue_)
 {
-    // TODO
+    buffer_ = cl::Buffer(
+        context_,
+        CL_MEM_READ_WRITE,
+        buffer_size_bytes()
+    );
+
+    queue_.enqueueCopyBuffer(
+        other.buffer_,
+        buffer_,
+        0,
+        0,
+        buffer_size_bytes()
+    );
+
+    queue_.finish();
 }
 
 MatrixCL& MatrixCL::operator=(const MatrixCL& other)
 {
     if (this == &other) return *this;
 
-    // TODO
+    rows_ = other.rows_;
+    cols_ = other.cols_;
+    context_ = other.context_;
+    queue_ = other.queue_;
+
+    buffer_ = cl::Buffer(
+        context_,
+        CL_MEM_READ_WRITE,
+        buffer_size_bytes()
+    );
+
+    queue_.enqueueCopyBuffer(
+        other.buffer_,
+        buffer_,
+        0,
+        0,
+        buffer_size_bytes()
+    );
+
+    queue_.finish();
 
     return *this;
 }
@@ -164,16 +233,30 @@ std::vector<float> MatrixCL::copyToHost() const
     size_t size = buffer_size_bytes();
     if (size == 0) return host_data;
 
-    // TODO
+    queue_.enqueueReadBuffer(
+        buffer_,
+        CL_TRUE,
+        0,
+        buffer_size_bytes(),
+        host_data.data()        
+    );
 
     return host_data;
 }
 
 void MatrixCL::fill(float value)
 {
-    if (rows_ * cols_ == 0) return;
+    size_t N = rows_ * cols_; 
+    if (N == 0) return;
 
-    // TODO
+    cl::Kernel kernel = kernels_->kernel_fill;
+
+    kernel.setArg(0, buffer_);
+    kernel.setArg(1, value);
+    kernel.setArg(2, rows_);
+    kernel.setArg(3, cols_);
+    queue_.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(N), cl::NullRange);
+    queue_.finish();
 }
 
 MatrixCL MatrixCL::operator+(const MatrixCL& other) const
