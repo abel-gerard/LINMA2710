@@ -41,7 +41,7 @@ cl::Program loadAndBuildProgram(cl::Context context,
 const std::string kernel_source_fill = R"(
     __kernel void fill(__global float* matrix, float value, int rows, int cols) {
         int i = get_global_id(0);
-        if (i < rows*cols) {
+        if (i < rows * cols) {
             matrix[i] = value;
         }
     }
@@ -53,7 +53,9 @@ const std::string kernel_source_add = R"(
                       __global float* C,
                       int rows, int cols) {
         int i = get_global_id(0);
-        if (i >= rows * cols) return;
+        if (i < rows * cols) {
+            C[i] = A[i] + B[i];
+        }
     }
 )";
 
@@ -63,7 +65,9 @@ const std::string kernel_source_sub_mul = R"(
                           float scalar,
                           int rows, int cols) {
         int i = get_global_id(0);
-        if (i >= rows * cols) return;
+        if (i < rows * cols) {
+            A[i] -= B[i] * scalar;
+        }
     }
 )";
 
@@ -71,8 +75,14 @@ const std::string kernel_source_transpose = R"(
     __kernel void transpose(__global const float* A,
                             __global float* B,
                             int A_rows, int A_cols) {
+        // r' = i % A_rows
+        // c' = i / A_rows
+        // i' = r' * A_cols + c' = (i % A_rows) * A_cols + i / A_rows
+
         int i = get_global_id(0);
-        if (i >= A_rows * A_cols) return;
+        if (i < A_rows * A_cols) {
+            B[i] = A[(i % A_rows) * A_cols + i / A_rows];
+        }
     }
 )";
 
@@ -82,7 +92,13 @@ const std::string kernel_source_matrix_mul = R"(
                              __global float* C,
                              int A_rows, int A_cols, int B_cols) {
         int i = get_global_id(0);
-        if (i >= A_rows * B_cols) return;
+        if (i < A_rows * B_cols) {
+            C[i] = 0.0f;
+            int r = i / B_cols, c = i % B_cols;
+            for (int k = 0; k < A_cols; k++) {
+                C[i] += A[r * A_cols + k] * B[k * B_cols + c];
+            }
+        }
     }
 )";
 
@@ -244,27 +260,43 @@ std::vector<float> MatrixCL::copyToHost() const
     return host_data;
 }
 
+// Helpful macros
+#define nqfin(q_, kernel_, N_) do { \
+    (q_).enqueueNDRangeKernel((kernel_), cl::NullRange, cl::NDRange(N_)); \
+    (q_).finish(); \
+} while(0);
+
+#define setargs(kernel_, ...) do { \
+    int arg_idx = 0; \
+    auto set_arg_lambda = [&](auto&&... args) { \
+        (((kernel_).setArg(arg_idx++, args)), ...); \
+    }; \
+    set_arg_lambda(__VA_ARGS__); \
+} while(0);
+
 void MatrixCL::fill(float value)
 {
     size_t N = rows_ * cols_; 
     if (N == 0) return;
 
     cl::Kernel kernel = kernels_->kernel_fill;
-
-    kernel.setArg(0, buffer_);
-    kernel.setArg(1, value);
-    kernel.setArg(2, rows_);
-    kernel.setArg(3, cols_);
-    queue_.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(N), cl::NullRange);
-    queue_.finish();
+    setargs(kernel, buffer_, value, rows_, cols_);
+    nqfin(queue_, kernel, N);
 }
 
 MatrixCL MatrixCL::operator+(const MatrixCL& other) const
 {
     MatrixCL result(rows_, cols_, context_, queue_);
-    if (rows_ * cols_ == 0) return result;
+    size_t N = rows_ * cols_; 
+    if (N == 0) return result;
 
-    // TODO
+    if (rows_ != other.rows_ || cols_ != other.cols_) {
+        throw std::invalid_argument("Dimension mismatch during addition");
+    } 
+
+    cl::Kernel kernel = kernels_->kernel_add;
+    setargs(kernel, buffer_, other.buffer_, result.buffer_, rows_, cols_);
+    nqfin(queue_, kernel, N);
 
     return result;
 }
@@ -272,9 +304,16 @@ MatrixCL MatrixCL::operator+(const MatrixCL& other) const
 MatrixCL MatrixCL::operator-(const MatrixCL& other) const
 {
     MatrixCL result(*this);
-    if (rows_ * cols_ == 0) return result;
+    size_t N = rows_ * cols_; 
+    if (N == 0) return result;
 
-    // TODO
+    if (rows_ != other.rows_ || cols_ != other.cols_) {
+        throw std::invalid_argument("Dimension mismatch during subtraction");
+    }
+    
+    cl::Kernel kernel = kernels_->kernel_sub_mul;
+    setargs(kernel, result.buffer_, other.buffer_, 1.0f, rows_, cols_);
+    nqfin(queue_, kernel, N);
 
     return result;
 }
@@ -282,9 +321,19 @@ MatrixCL MatrixCL::operator-(const MatrixCL& other) const
 MatrixCL MatrixCL::operator*(float scalar) const
 {
     MatrixCL result(rows_, cols_, context_, queue_);
-    if (rows_ * cols_ == 0) return result;
+    size_t N = rows_ * cols_; 
+    if (N == 0) return result;
 
-    // TODO
+    cl::Kernel kernel;
+
+    // result := this * scalar <=> result := 0 then result := result - this * (-scalar)
+    kernel = kernels_->kernel_fill;
+    setargs(kernel, result.buffer_, 0.0f, rows_, cols_);
+    nqfin(queue_, kernel, N);
+
+    kernel = kernels_->kernel_sub_mul;
+    setargs(kernel, result.buffer_, buffer_, -scalar, rows_, cols_);
+    nqfin(queue_, kernel, N);
 
     return result;
 }
@@ -294,9 +343,16 @@ MatrixCL MatrixCL::operator*(const MatrixCL& other) const
     int C_rows = this->rows_;
     int C_cols = other.cols_;
     MatrixCL result(C_rows, C_cols, context_, queue_);
-    if (C_rows * C_cols == 0) return result;
+    size_t N = C_rows * C_cols; 
+    if (N == 0) return result;
 
-    // TODO
+    if (cols_ != other.rows_) {
+        throw std::invalid_argument("Dimension mismatch during matrix multiplication");
+    }
+
+    cl::Kernel kernel = kernels_->kernel_matrix_mul;
+    setargs(kernel, buffer_, other.buffer_, result.buffer_, rows_, cols_, other.cols_);
+    nqfin(queue_, kernel, N); 
 
     return result;
 }
@@ -304,16 +360,26 @@ MatrixCL MatrixCL::operator*(const MatrixCL& other) const
 MatrixCL MatrixCL::transpose() const
 {
     MatrixCL result(cols_, rows_, context_, queue_);
-    if (rows_ * cols_ == 0) return result;
+    size_t N = rows_ * cols_; 
+    if (N == 0) return result;
 
-    // TODO
+    cl::Kernel kernel = kernels_->kernel_transpose;
+    setargs(kernel, buffer_, result.buffer_, rows_, cols_);
+    nqfin(queue_, kernel, N);
 
     return result;
 }
 
 void MatrixCL::sub_mul(float scalar, const MatrixCL& other)
 {
-    if (rows_ * cols_ == 0) return;
+    size_t N = rows_ * cols_; 
+    if (N == 0) return;
 
-    // TODO
+    if (rows_ != other.rows_ || cols_ != other.cols_) {
+        throw std::invalid_argument("Dimension mismatch during sub-mul");
+    }
+
+    cl::Kernel kernel = kernels_->kernel_sub_mul;
+    setargs(kernel, buffer_, other.buffer_, scalar, rows_, cols_);
+    nqfin(queue_, kernel, N);
 }
