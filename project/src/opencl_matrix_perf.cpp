@@ -43,9 +43,15 @@ int main()
 #if CL_MUL_METHOD == 0
     const std::string method = "opencl_naive";
 #elif CL_MUL_METHOD == 1
-    const std::string method = "opencl_tiled";
+    #if TILE_SIZE == 4
+        const std::string method = "opencl_tiled_4";
+    #elif TILE_SIZE == 8
+        const std::string method = "opencl_tiled_8";
+    #else
+        const std::string method = "opencl_tiled_16";
+    #endif
 #else
-    const std::string method = "opencl_unknown";
+    exit(1);
 #endif
 
     std::ofstream csv("performance/" + method + ".csv", std::ios::trunc);
@@ -78,13 +84,14 @@ int main()
         double total_duration = 0.0;
         std::vector<double> durations(NUM_TESTS);
         for (int t = 0; t < NUM_TESTS; t++) {
-            auto start = std::chrono::high_resolution_clock::now();
             MatrixCL C = A * B;
-            auto end = std::chrono::high_resolution_clock::now();
+            cl::Event event = C.last_event_; 
 
-            double duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            total_duration += duration;
+            cl_ulong start = event.getProfilingInfo<CL_PROFILING_COMMAND_START>();
+            cl_ulong end   = event.getProfilingInfo<CL_PROFILING_COMMAND_END>();
+            double duration = (end - start) / 1000.0;
             durations[t] = duration;
+            total_duration += duration;
         }
 
         double avg = total_duration / NUM_TESTS;

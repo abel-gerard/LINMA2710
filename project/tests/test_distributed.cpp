@@ -161,12 +161,13 @@ void testMultiplyTransposed() {
     for (int i = 0; i < 4; i++)
         for (int j = 0; j < 5; j++)
             matrix2Full.set(i, j, i * 5 + j + 2);
-
+            
     DistributedMatrix matrix1(matrix1Full, numProcs);
     DistributedMatrix matrix2(matrix2Full, numProcs);
-
+    
     Matrix result = matrix1.multiplyTransposed(matrix2);
     Matrix expected = matrix1Full * matrix2Full.transpose();
+    
     assert(matricesEqual(result, expected, 1e-8));
 
     if (rank == 0)

@@ -97,9 +97,16 @@ const std::string kernel_source_matrix_mul = R"(
     }
 )";
 
-const std::string kernel_source_matrix_mul_tiled = R"(
-    __kernel void matrix_mul_tiled(__global const float* A, __global const float* B, __global float* C, int A_rows, int A_cols, int B_cols) {
-        const int TILE = 16;
+const std::string kernel_source_matrix_mul_tiled = 
+    "__kernel void matrix_mul_tiled(__global const float* A, __global const float* B, __global float* C, int A_rows, int A_cols, int B_cols) {"    
+#if TILE_SIZE == 4
+    "   const int TILE = 4;"
+#elif TILE_SIZE == 8
+    "   const int TILE = 8;" 
+#else
+    "   const int TILE = 16;" 
+#endif
+    R"(
         __local float tileA[TILE][TILE];
         __local float tileB[TILE][TILE];
 
@@ -387,9 +394,13 @@ MatrixCL MatrixCL::operator*(const MatrixCL& other) const
     }
 
 #if CL_MUL_METHOD == 0
+
     cl::Kernel kernel = kernels_->kernel_matrix_mul;
     setargs(kernel, buffer_, other.buffer_, result.buffer_, rows_, cols_, other.cols_);
-    nqfin(queue_, kernel, N); 
+
+    queue_.enqueueNDRangeKernel(kernel, cl::NullRange, N, cl::NullRange, nullptr, &result.last_event_);
+    queue_.finish();
+
 #elif CL_MUL_METHOD == 1
 
 #define ceil_div(a, b) (((a) + (b) - 1) / (b))
@@ -397,11 +408,18 @@ MatrixCL MatrixCL::operator*(const MatrixCL& other) const
     cl::Kernel kernel = kernels_->kernel_matrix_mul_tiled;
     setargs(kernel, buffer_, other.buffer_, result.buffer_, rows_, cols_, other.cols_);
 
-    const int TILE = 16; 
+#if TILE_SIZE == 4
+    const int TILE = 4;
+#elif TILE_SIZE == 8
+    const int TILE = 8;
+#else
+    const int TILE = 16;
+#endif
+    
     cl::NDRange global(ceil_div(other.cols_, TILE)*TILE, ceil_div(rows_, TILE)*TILE);
     cl::NDRange local(TILE, TILE);
 
-    queue_.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
+    queue_.enqueueNDRangeKernel(kernel, cl::NullRange, global, local, nullptr, &result.last_event_);
     queue_.finish();
 
 #else
