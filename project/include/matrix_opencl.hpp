@@ -19,6 +19,7 @@ struct KernelCache {
     cl::Kernel kernel_sub_mul;
     cl::Kernel kernel_transpose;
     cl::Kernel kernel_matrix_mul;
+    cl::Kernel kernel_matrix_mul_tiled;
 
     bool initialized = false;
 

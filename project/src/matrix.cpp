@@ -74,7 +74,9 @@ Matrix Matrix::operator-(const Matrix &other) const
     return nu;
 }
 
+#ifndef MUL_METHOD
 #define MUL_METHOD 0//1
+#endif
 Matrix Matrix::operator*(const Matrix &other) const
 {
     if (cols != other.rows) {
@@ -204,7 +206,9 @@ Matrix Matrix::operator*(double scalar) const
     return nu;
 }
 
+#ifndef TRANSPOSE_METHOD
 #define TRANSPOSE_METHOD 0//1
+#endif
 Matrix Matrix::transpose() const
 {
     Matrix nu(cols, rows);

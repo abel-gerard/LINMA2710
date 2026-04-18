@@ -5,11 +5,6 @@
 #include <stdexcept>
 #include <memory>
 
-#if 1
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter" 
-#endif
-
 std::shared_ptr<KernelCache> MatrixCL::kernels_ = nullptr;
 
 cl::Program loadAndBuildProgram(cl::Context context,
@@ -102,6 +97,41 @@ const std::string kernel_source_matrix_mul = R"(
     }
 )";
 
+const std::string kernel_source_matrix_mul_tiled = R"(
+    __kernel void matrix_mul_tiled(__global const float* A, __global const float* B, __global float* C, int A_rows, int A_cols, int B_cols) {
+        const int TILE = 16;
+        __local float tileA[TILE][TILE];
+        __local float tileB[TILE][TILE];
+
+        int row = get_global_id(1);
+        int col = get_global_id(0);
+        int lrow = get_local_id(1);
+        int lcol = get_local_id(0);
+
+        float acc = 0.0f;
+        for (int chunk = 0; chunk < (int)ceil((float)A_cols / TILE); chunk++) {
+            tileA[lrow][lcol] = 0.0f;
+            tileB[lrow][lcol] = 0.0f;
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            if (row < A_rows && chunk * TILE + lcol < A_cols)
+                tileA[lrow][lcol] = A[row * A_cols + chunk * TILE + lcol];
+            if (col < B_cols && chunk * TILE + lrow < A_cols)
+                tileB[lrow][lcol] = B[(chunk * TILE + lrow) * B_cols + col];
+            
+            barrier(CLK_LOCAL_MEM_FENCE);
+
+            for (int k = 0; k < TILE; k++) {
+                acc += tileA[lrow][k] * tileB[k][lcol];
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+
+        if (row < A_rows && col < B_cols)
+            C[row * B_cols + col] = acc;
+    }
+)";
+
 // --- KernelCache ---
 
 void KernelCache::compileKernels(cl::Context context, const std::vector<cl::Device>& devices) {
@@ -123,6 +153,9 @@ void KernelCache::compileKernels(cl::Context context, const std::vector<cl::Devi
 
         cl::Program prog_matrix_mul = loadAndBuildProgram(context, devices, kernel_source_matrix_mul, "matrix_mul");
         kernel_matrix_mul = cl::Kernel(prog_matrix_mul, "matrix_mul");
+
+        cl::Program prog_matrix_mul_tiled = loadAndBuildProgram(context, devices, kernel_source_matrix_mul_tiled, "matrix_mul_tiled");
+        kernel_matrix_mul_tiled = cl::Kernel(prog_matrix_mul_tiled, "matrix_mul_tiled");
 
         initialized = true;
         std::cout << "OpenCL kernels compiled successfully." << std::endl;
@@ -338,6 +371,9 @@ MatrixCL MatrixCL::operator*(float scalar) const
     return result;
 }
 
+#ifndef CL_MUL_METHOD
+#define CL_MUL_METHOD 1
+#endif
 MatrixCL MatrixCL::operator*(const MatrixCL& other) const
 {
     int C_rows = this->rows_;
@@ -350,9 +386,27 @@ MatrixCL MatrixCL::operator*(const MatrixCL& other) const
         throw std::invalid_argument("Dimension mismatch during matrix multiplication");
     }
 
+#if CL_MUL_METHOD == 0
     cl::Kernel kernel = kernels_->kernel_matrix_mul;
     setargs(kernel, buffer_, other.buffer_, result.buffer_, rows_, cols_, other.cols_);
     nqfin(queue_, kernel, N); 
+#elif CL_MUL_METHOD == 1
+
+#define ceil_div(a, b) (((a) + (b) - 1) / (b))
+
+    cl::Kernel kernel = kernels_->kernel_matrix_mul_tiled;
+    setargs(kernel, buffer_, other.buffer_, result.buffer_, rows_, cols_, other.cols_);
+
+    const int TILE = 16; 
+    cl::NDRange global(ceil_div(other.cols_, TILE)*TILE, ceil_div(rows_, TILE)*TILE);
+    cl::NDRange local(TILE, TILE);
+
+    queue_.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
+    queue_.finish();
+
+#else
+    throw std::invalid_argument("Invalid multiplication method");
+#endif
 
     return result;
 }
