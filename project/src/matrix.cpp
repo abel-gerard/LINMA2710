@@ -74,9 +74,6 @@ Matrix Matrix::operator-(const Matrix &other) const
     return nu;
 }
 
-#ifndef MUL_METHOD
-#define MUL_METHOD 1
-#endif
 Matrix Matrix::operator*(const Matrix &other) const
 {
     if (cols != other.rows) {
@@ -84,28 +81,11 @@ Matrix Matrix::operator*(const Matrix &other) const
     }
 
     Matrix nu(rows, other.cols);
-
-    // ijk loop ~1µs
-#if MUL_METHOD == 0
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < other.cols; j++) {
-
-            double acc = 0.;
-            const double *const data_self = &data[i*cols];
-            
-            #pragma omp simd reduction(+:acc)
-            for (int k = 0; k < cols; k++) {
-                acc += data_self[k] * other.data[k*other.cols+j];
-            }
-            nu.data[i*nu.cols+j] = acc;
-        }
-    } 
-
-    // We can transpose the other matrix to improve locality
-    // ~0.16µs
-#elif MUL_METHOD == 1
     const Matrix t_other = other.transpose();
     
+#ifdef USE_OMP
+    #pragma omp parallel for collapse(2) schedule(static)
+#endif
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < other.cols; j++) {
 
@@ -114,7 +94,7 @@ Matrix Matrix::operator*(const Matrix &other) const
             const double *const data_other = &t_other.data[j*t_other.cols];
             
 #ifdef USE_OMP
-            #pragma omp simd reduction(+:acc) num_threads(12)
+            #pragma omp simd reduction(+:acc) num_threads(16)
 #endif
             for (int k = 0; k < cols; k++) {
                 acc += data_self[k] * data_other[k];
@@ -123,10 +103,6 @@ Matrix Matrix::operator*(const Matrix &other) const
         }
     }  
 
-#else 
-    throw std::invalid_argument("Invalid multiplication method");
-
-#endif
     return nu;
 }
 
