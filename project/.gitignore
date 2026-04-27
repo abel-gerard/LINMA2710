@@ -1,4 +1,4 @@
 .vscode
-matrix
-test_distributed
-test_matrix
+.python-version
+pyproject.toml
+uv.lock

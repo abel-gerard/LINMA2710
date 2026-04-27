@@ -76,8 +76,8 @@ int main(int argc, char **argv)
             }
             sigma = sqrt(sigma / (NUM_TESTS - 1));
 
-            std::cout << "matrix," << MAT_DIM << "," << avg << "," << sigma << "\n";
-            csv << "matrix," << MAT_DIM << "," << avg << "," << sigma << "\n";
+            std::cout << "distributed," << MAT_DIM << "," << avg << "," << sigma << "\n";
+            csv << "distributed," << MAT_DIM << "," << avg << "," << sigma << "\n";
         }
     }
 

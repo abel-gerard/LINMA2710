@@ -75,7 +75,7 @@ Matrix Matrix::operator-(const Matrix &other) const
 }
 
 #ifndef MUL_METHOD
-#define MUL_METHOD 0//1
+#define MUL_METHOD 1
 #endif
 Matrix Matrix::operator*(const Matrix &other) const
 {
@@ -113,79 +113,15 @@ Matrix Matrix::operator*(const Matrix &other) const
             const double *const data_self = &data[i*cols];
             const double *const data_other = &t_other.data[j*t_other.cols];
             
-            // Pragma is a bit useless
-            // #pragma omp simd reduction(+:acc) num_threads(12)
+#ifdef USE_OMP
+            #pragma omp simd reduction(+:acc) num_threads(12)
+#endif
             for (int k = 0; k < cols; k++) {
                 acc += data_self[k] * data_other[k];
             }
             nu.data[i*nu.cols+j] = acc;
         }
     }  
-
-    // ikj loop ~0.16µs
-#elif MUL_METHOD == 2
-    for (int i = 0; i < rows; i++) {
-
-        double *const data_nu = &nu.data[i*nu.cols];
-        
-        for (int k = 0; k < cols; k++) {
-
-            const double val = data[i*cols+k];
-            const double *const data_other = &other.data[k*other.cols];
-            
-            #pragma omp simd reduction(+:data_nu[:other.cols])
-            for (int j = 0; j < other.cols; j++) {
-                data_nu[j] += val * data_other[j];
-            }
-        }
-    }
-
-    // kij loop ~0.2µs
-#elif MUL_METHOD == 3
-    for (int k = 0; k < cols; k++) {
-        
-        const double *const data_other = &other.data[k*other.cols];
-        
-        for (int i = 0; i < rows; i++) {
-
-            const double val = data[i*cols+k];
-            double *const data_nu = &nu.data[i*nu.cols];
-            
-            #pragma omp simd reduction(+:data_nu[:other.cols])
-            for (int j = 0; j < other.cols; j++) {
-                data_nu[j] += val * data_other[j];
-            }
-        }
-    }
-
-    // Tiling
-    // ~2.5µs
-#elif MUL_METHOD == 4
-    const int tile_size = 64;
-    for (int i = 0; i < rows; i += tile_size) {
-        for (int j = 0; j < other.cols; j += tile_size) {
-            for (int k = 0; k < cols; k += tile_size) {
-
-                const int i_max = std::min(i + tile_size, rows);
-                const int j_max = std::min(j + tile_size, other.cols);
-                const int k_max = std::min(k + tile_size, cols);
-
-                for (int ii = i; ii < i_max; ii++) {
-                    for (int jj = j; jj < j_max; jj++) {
-
-                        double acc = 0.;
-                        const double *const data_self = &data[ii*cols];
-                        
-                        #pragma omp simd reduction(+:acc)
-                        for (int kk = k; kk < k_max; kk++) {
-                            acc += data_self[kk] * other.data[kk*other.cols+jj];
-                        }
-                        nu.data[ii*nu.cols+jj] += acc;
-                    }
-                }
-            }
-        }
-    }
 
 #else 
     throw std::invalid_argument("Invalid multiplication method");
@@ -206,38 +142,15 @@ Matrix Matrix::operator*(double scalar) const
     return nu;
 }
 
-#ifndef TRANSPOSE_METHOD
-#define TRANSPOSE_METHOD 0//1
-#endif
 Matrix Matrix::transpose() const
 {
     Matrix nu(cols, rows);
     
-#if TRANSPOSE_METHOD == 0
     for (int i = 0; i < rows; i++) {
         for (int j = 0; j < cols; j++) {
             nu.data[j*nu.cols+i] = data[i*cols+j];
         }
     } 
-
-    // Block transpose
-#elif TRANSPOSE_METHOD == 1
-    const int block_size = 64;
-    for (int i = 0; i < rows; i += block_size) {
-        for (int j = 0; j < cols; j += block_size) {
-
-            const int i_max = std::min(i + block_size, rows);
-            const int j_max = std::min(j + block_size, cols);
-
-            for (int ii = i; ii < i_max; ii++) {
-                for (int jj = j; jj < j_max; jj++) {
-                    nu.data[jj*nu.cols+ii] = data[ii*cols+jj];
-                }
-            }
-        }
-    }
-
-#endif
 
     return nu;
 }

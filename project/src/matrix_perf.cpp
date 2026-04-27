@@ -8,10 +8,16 @@
 
 #define NUM_TESTS 10
 
+#ifdef USE_OMP
+    const std::string method = "omp";
+#else
+    const std::string method = "matrix";
+#endif
+
 int main() 
 {
     std::filesystem::create_directories("performance");
-    std::ofstream csv("performance/matrix.csv", std::ios::trunc);
+    std::ofstream csv("performance/" + method + ".csv", std::ios::trunc);
     csv << "method,dim,avg_us,std_us\n";
 
     std::random_device rd;
@@ -59,11 +65,11 @@ int main()
         }
         sigma = sqrt(sigma / (NUM_TESTS - 1));
 
-        std::cout << "matrix," << MAT_DIM << "," << avg << "," << sigma << "\n";
-        csv << "matrix," << MAT_DIM << "," << avg << "," << sigma << "\n";
+        std::cout << method << "," << MAT_DIM << "," << avg << "," << sigma << "\n";
+        csv << method << "," << MAT_DIM << "," << avg << "," << sigma << "\n";
     }
 
     csv.close();
-    std::cout << "Results written to performance/matrix.csv\n";
+    std::cout << "Results written to performance/" << method << ".csv\n";
     return 0;
 }
