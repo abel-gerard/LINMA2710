@@ -9,7 +9,21 @@
 #define NUM_TESTS 10
 
 #ifdef USE_OMP
-    const std::string method = "omp";
+#if OMP_T == 1
+    const std::string method = "omp_t1";
+#elif OMP_T == 2
+    const std::string method = "omp_t2";
+#elif OMP_T == 4
+    const std::string method = "omp_t4";
+#elif OMP_T == 8
+    const std::string method = "omp_t8";
+#elif OMP_T == 16
+    const std::string method = "omp_t16";
+#else
+#define OMP_T 1
+    const std::string method = "omp_t1";
+#endif
+
 #else
     const std::string method = "matrix";
 #endif

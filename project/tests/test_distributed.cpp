@@ -318,6 +318,41 @@ void testCommonOperations() {
         std::cout << "testCommonOperations passed." << std::endl;
 }
 
+void testSync() {
+    int rank, numProcs;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
+
+    int m = 2, n = 2;
+    Matrix A(0, 0);
+
+    if (rank == 0) {
+        A = Matrix(m, n);
+
+        for (int i = 0; i < m; i++) {
+            for (int j = 0; j < n; j++) {
+                A.set(i, j, i * n + j);
+            }
+        }
+    }
+
+    sync_matrix(&A, rank, 0);
+
+    if (rank != 0) {
+        assert(A.numRows() == 2);
+        assert(A.numCols() == 2);
+            
+        assert(A.get(0, 0) == 0);
+        assert(A.get(0, 1) == 1);
+        assert(A.get(1, 0) == 2);
+        assert(A.get(1, 1) == 3);
+    }
+
+    if (rank == 0) {
+        std::cout << "testSync passed." << std::endl;
+    }
+}
+
 int main(int argc, char** argv) {
     int initialized;
     MPI_Initialized(&initialized);
@@ -342,6 +377,7 @@ int main(int argc, char** argv) {
         testGetAndSet();
         testCopyConstructor();
         testCommonOperations();
+        testSync();
 
         if (rank == 0)
             std::cout << "All distributed matrix tests passed." << std::endl;

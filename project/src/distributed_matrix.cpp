@@ -300,5 +300,35 @@ Matrix DistributedMatrix::gather() const
 
 void sync_matrix(Matrix *matrix, int rank, int src)
 {
-    // TODO
+    int dims[2];
+    if (rank == src) {
+        dims[0] = matrix->numRows();
+        dims[1] = matrix->numCols();
+    }
+
+    MPI_Bcast(dims, 2, MPI_INT, src, MPI_COMM_WORLD);
+
+    if (rank != src) {
+        *matrix = Matrix(dims[0], dims[1]);
+    }
+
+    int N = dims[0] * dims[1];
+    std::vector<double> buffer(N);
+    if (rank == src) {
+        for (int i = 0; i < dims[0]; i++) {
+            for (int j = 0; j < dims[1]; j++) {
+                buffer[i * dims[1] + j] = matrix->get(i, j);
+            }
+        }
+    }
+
+    MPI_Bcast(buffer.data(), N, MPI_DOUBLE, src, MPI_COMM_WORLD);
+
+    if (rank != src) {
+        for (int i = 0; i < dims[0]; i++) {
+            for (int j = 0; j < dims[1]; j++) {
+                matrix->set(i, j, buffer[i * dims[1] + j]);
+            }
+        }
+    }
 }
