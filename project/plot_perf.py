@@ -67,6 +67,7 @@ os.makedirs(PERF_DIR, exist_ok=True)
 fig1, ax1 = plt.subplots(figsize=(8, 5))
 LABELS = {
     "matrix":             "CPU",
+    "omp_t16":            "CPU (OMP T=16)",
     "distributed_matrix": "Distributed (MPI)",
     "opencl_naive":       "OpenCL naive",
 }
@@ -103,19 +104,40 @@ fig3.savefig(os.path.join(PERF_DIR, "plot_tile_comparison.svg"))
 
 fig4, ax4 = plt.subplots(figsize=(8, 5))
 OMP_LABELS = {
-    "matrix":      "matrix (no OMP)",
     "omp_t1":      "matrix (with OMP, T=1)",
     "omp_t2":      "matrix (with OMP, T=2)",
     "omp_t4":      "matrix (with OMP, T=4)",
     "omp_t8":      "matrix (with OMP, T=8)",
     "omp_t16":     "matrix (with OMP, T=16)",
 }
-for key in ("matrix", "omp_t1", "omp_t2", "omp_t4", "omp_t8", "omp_t16"):
+for key in ("omp_t1", "omp_t2", "omp_t4", "omp_t8", "omp_t16"):
     if dfs[key] is not None:
         plot_with_band(ax4, dfs[key], OMP_LABELS[key], COLORS[key])
 
-style_loglog(ax4, "Matrix (w/ vs w/o OMP)")
+style_loglog(ax4, "Matrix w/ OMP")
 fig4.tight_layout()
 fig4.savefig(os.path.join(PERF_DIR, "plot_matrix_comparison.svg"))
 
 plt.show()
+
+N = 4096
+print(f"Performance metrics for N={N}:")
+metrics = {}
+
+for key, df in dfs.items():
+    if df is not None and N in df["dim"].values:
+        row = df[df["dim"] == N].iloc[0]
+        metrics[key] = (row['avg_us']*1e-6, row['std_us']*1e-6)  # Convert to seconds
+        print(f"{key}: {row['avg_us']*1e-6:.2f} s ± {row['std_us']*1e-6:.2f} s")
+
+print("\nSpeedup metrics for N=4096:")
+print("  CPU:")
+print(f"  - Distributed (MPI): {metrics['matrix'][0]/metrics['distributed_matrix'][0]:.2f}x")
+print(f"  - OpenCL naive: {metrics['matrix'][0]/metrics['opencl_naive'][0]:.2f}x")
+print("  OpenCL:")
+print(f"  - Tiled (TILE=16) vs naive: {metrics['opencl_naive'][0]/metrics['opencl_tiled_16'][0]:.2f}x")
+print(f"  - Tiled (TILE=8) vs tiled (TILE=4): {metrics['opencl_tiled_4'][0]/metrics['opencl_tiled_8'][0]:.2f}x")
+print(f"  - Tiled (TILE=16) vs tiled (TILE=4): {metrics['opencl_tiled_4'][0]/metrics['opencl_tiled_16'][0]:.2f}x")  
+print("  OMP:")
+for t in (2, 4, 8, 16):
+    print(f"  - OMP T={t} vs OMP T=1: {metrics['omp_t1'][0]/metrics[f'omp_t{t}'][0]:.2f}x, eff. = {metrics['omp_t1'][0]/(metrics[f'omp_t{t}'][0]*t):.2f}")
