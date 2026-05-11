@@ -34,8 +34,17 @@ void setupOpenCL() {
     MatrixCL::initializeKernels(context, {device});
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    bool no_output = false;
+
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--no-output") {
+            no_output = true;   
+        }
+    }
+
     setupOpenCL();
 
     std::filesystem::create_directories("performance");
@@ -54,8 +63,12 @@ int main()
     exit(1);
 #endif
 
-    std::ofstream csv("performance/" + method + ".csv", std::ios::trunc);
-    csv << "method,dim,avg_us,std_us\n";
+    std::ofstream csv;
+
+    if (!no_output) {
+        csv.open("performance/" + method + ".csv", std::ios::trunc);
+        csv << "method,dim,avg_us,std_us\n";
+    }
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -66,9 +79,8 @@ int main()
 #endif
 #define DIM_START 1<<3
     int dims[DIM_COUNT];
-    for (int i = 0; i < DIM_COUNT; i += 2) {
-        dims[i] = i == 0 ? DIM_START : dims[i-2]*2;
-        dims[i+1] = dims[i] + (dims[i]/2);
+    for (int i = 0; i < DIM_COUNT; i++) {
+        i % 2 == 0 ? dims[i] = DIM_START << (i / 2) : dims[i] = dims[i-1] * 3 / 2;
     }
 
     for (auto MAT_DIM : dims) {
@@ -100,11 +112,16 @@ int main()
             sigma += pow(durations[t] - avg, 2.0);
         sigma = sqrt(sigma / (NUM_TESTS - 1));
 
-        std::cout << method << "," << MAT_DIM << "," << avg << "," << sigma << "\n";
-        csv << method << "," << MAT_DIM << "," << avg << "," << sigma << "\n";
+        if (!no_output) {
+            std::cout << method << "," << MAT_DIM << "," << avg << "," << sigma << "\n";
+            csv << method << "," << MAT_DIM << "," << avg << "," << sigma << "\n";
+        }
     }
 
-    csv.close();
-    std::cout << "Results written to performance/" << method << ".csv\n";
+    if (!no_output) {
+        csv.close();
+        std::cout << "Results written to performance/" << method << ".csv\n";
+    }
+
     return 0;
 }
