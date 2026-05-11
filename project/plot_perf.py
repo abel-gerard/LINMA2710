@@ -1,9 +1,13 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from matplotlib import colormaps as cm
+from matplotlib import colors as mcolors
 import os
 import sys
 
+
+SAVE_FLAG = False
 
 PERF_DIR = "performance"
 FILES = {
@@ -18,6 +22,7 @@ FILES = {
     "opencl_tiled_4":     os.path.join(PERF_DIR, "opencl_tiled_4.csv"),
     "opencl_tiled_8":     os.path.join(PERF_DIR, "opencl_tiled_8.csv"),
     "opencl_tiled_16":    os.path.join(PERF_DIR, "opencl_tiled_16.csv"),
+    "emissions":          os.path.join(PERF_DIR, "emissions.csv"),
 }
 
 def load(path):
@@ -77,7 +82,8 @@ for key, label in LABELS.items():
 
 style_loglog(ax1, "OpenCL (all methods)")
 fig1.tight_layout()
-fig1.savefig(os.path.join(PERF_DIR, "plot_all_methods.svg"))
+if SAVE_FLAG:
+    fig1.savefig(os.path.join(PERF_DIR, "plot_all_methods.svg"))
 
 fig2, ax2 = plt.subplots(figsize=(8, 5))
 for key in ("opencl_naive", "opencl_tiled_16"):
@@ -86,7 +92,8 @@ for key in ("opencl_naive", "opencl_tiled_16"):
 
 style_loglog(ax2, "OpenCL (naive vs tiled)")
 fig2.tight_layout()
-fig2.savefig(os.path.join(PERF_DIR, "plot_opencl_comparison.svg"))
+if SAVE_FLAG:
+    fig2.savefig(os.path.join(PERF_DIR, "plot_opencl_comparison.svg"))
 
 fig3, ax3 = plt.subplots(figsize=(8, 5))
 TILE_LABELS = {
@@ -100,7 +107,8 @@ for key, label in TILE_LABELS.items():
 
 style_loglog(ax3, "OpenCL tiled (tile size comparison)")
 fig3.tight_layout()
-fig3.savefig(os.path.join(PERF_DIR, "plot_tile_comparison.svg"))
+if SAVE_FLAG:
+    fig3.savefig(os.path.join(PERF_DIR, "plot_tile_comparison.svg"))
 
 fig4, ax4 = plt.subplots(figsize=(8, 5))
 OMP_LABELS = {
@@ -116,16 +124,44 @@ for key in ("omp_t1", "omp_t2", "omp_t4", "omp_t8", "omp_t16"):
 
 style_loglog(ax4, "Matrix w/ OMP")
 fig4.tight_layout()
-fig4.savefig(os.path.join(PERF_DIR, "plot_matrix_comparison.svg"))
+if SAVE_FLAG:
+    fig4.savefig(os.path.join(PERF_DIR, "plot_matrix_comparison.svg"))
+
+fig5, ax5 = plt.subplots(figsize=(8, 5))
+if dfs["emissions"] is not None:
+    names = {
+        "opencl_naive": "Naive",
+        "opencl_tiled_4": "T=4",
+        "opencl_tiled_8": "T=8",
+        "opencl_tiled_16": "T=16",
+    }
+
+    labels = [names[method] for method in dfs["emissions"]["method"]]
+    y_values = [em * 1e6 for em in dfs["emissions"]["emission"]] # kg to mg CO2e
+
+    cmap = cm.get_cmap("summer")
+    norm = mcolors.Normalize(vmin=min(y_values), vmax=max(y_values))
+
+    colors = [cmap(norm(val)) for val in y_values]
+
+    ax5.bar(labels, y_values, color=colors)
+    ax5.set_ylabel("Emissions (mg CO2e)")
+    ax5.set_title("CO2 Emissions by OpenCL Method")
+    ax5.grid(axis="y", linestyle="--", alpha=0.7)
+
+fig5.tight_layout()
+if SAVE_FLAG:
+    fig5.savefig(os.path.join(PERF_DIR, "emissions_comparison.svg"))
 
 plt.show()
 
-N = 4096
+# Set N to largest dimension available in the data
+N = max(df["dim"].max() for df in dfs.values() if df is not None and "dim" in df.columns)
 print(f"Performance metrics for N={N}:")
 metrics = {}
 
 for key, df in dfs.items():
-    if df is not None and N in df["dim"].values:
+    if df is not None and "dim" in df.columns and N in df["dim"].values:
         row = df[df["dim"] == N].iloc[0]
         metrics[key] = (row['avg_us']*1e-6, row['std_us']*1e-6)  # Convert to seconds
         print(f"{key}: {row['avg_us']*1e-6:.2f} s ± {row['std_us']*1e-6:.2f} s")
